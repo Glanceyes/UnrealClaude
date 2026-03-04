@@ -362,7 +362,10 @@ FString FClaudeCodeRunner::BuildCommandLine(const FClaudeRequestConfig& Config)
 
 			if (FFileHelper::SaveStringToFile(MCPConfigContent, *MCPConfigPath))
 			{
-				FString EscapedConfigPath = MCPConfigPath.Replace(TEXT("\\"), TEXT("/"));
+				// Convert to absolute path - FPaths::ProjectSavedDir() returns a relative path on macOS
+				// which UE resolves internally, but external processes (Claude CLI) need the full path
+				FString AbsConfigPath = FPaths::ConvertRelativePathToFull(MCPConfigPath);
+				FString EscapedConfigPath = AbsConfigPath.Replace(TEXT("\\"), TEXT("/"));
 				CommandLine += FString::Printf(TEXT("--mcp-config \"%s\" "), *EscapedConfigPath);
 				UE_LOG(LogUnrealClaude, Log, TEXT("MCP config written to: %s"), *MCPConfigPath);
 			}
@@ -1101,11 +1104,12 @@ void FClaudeCodeRunner::ExecuteProcess()
 
 	UE_LOG(LogUnrealClaude, Log, TEXT("Async executing Claude: %s %s"), *ClaudePath, *CommandLine);
 
-	// Set working directory
+	// Set working directory - convert to absolute path since FPaths::ProjectDir()
+	// returns a relative path on macOS that external processes can't resolve
 	FString WorkingDir = CurrentConfig.WorkingDirectory;
 	if (WorkingDir.IsEmpty())
 	{
-		WorkingDir = FPaths::ProjectDir();
+		WorkingDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir());
 	}
 
 	// Create pipes for stdout capture
