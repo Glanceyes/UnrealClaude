@@ -291,7 +291,7 @@ FReply SClaudeInputArea::HandleBrowseClicked()
 		return FReply::Handled();
 	}
 
-	const FString& SourcePath = SelectedFiles[0];
+	const FString SourcePath = FPaths::ConvertRelativePathToFull(SelectedFiles[0]);
 	const int64 FileSize = IFileManager::Get().FileSize(*SourcePath);
 	if (FileSize <= 0)
 	{
@@ -382,7 +382,7 @@ FReply SClaudeInputArea::HandleBrowseClicked()
 		DestPath = FPaths::Combine(FClipboardImageUtils::GetScreenshotDirectory(), DestFilename);
 		IFileManager::Get().MakeDirectory(*FPaths::GetPath(DestPath), true);
 
-		if (!IFileManager::Get().Copy(*DestPath, *SourcePath))
+		if (IFileManager::Get().Copy(*DestPath, *SourcePath) != COPY_OK)
 		{
 			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to copy image: %s"), *SourcePath);
 			return FReply::Handled();
