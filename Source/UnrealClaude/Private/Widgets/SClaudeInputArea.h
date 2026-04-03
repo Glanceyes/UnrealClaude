@@ -71,6 +71,9 @@ private:
 	/** Handle paste button click */
 	FReply HandlePasteClicked();
 
+	/** Handle browse file button click */
+	FReply HandleBrowseClicked();
+
 	/** Handle send/cancel button click */
 	FReply HandleSendCancelClicked();
 

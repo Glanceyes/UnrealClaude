@@ -66,6 +66,9 @@ public class UnrealClaude : ModuleRules
 		// Clipboard support (FPlatformApplicationMisc) on all platforms
 		PrivateDependencyModuleNames.Add("ApplicationCore");
 
+		// File browser dialog
+		PrivateDependencyModuleNames.Add("DesktopPlatform");
+
 		// Windows only
 		if (Target.Platform == UnrealTargetPlatform.Win64)
 		{

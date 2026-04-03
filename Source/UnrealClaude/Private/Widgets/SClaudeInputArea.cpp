@@ -19,6 +19,10 @@
 #include "Misc/FileHelper.h"
 #include "IImageWrapperModule.h"
 #include "IImageWrapper.h"
+#include "DesktopPlatformModule.h"
+#include "Framework/Application/SlateApplication.h"
+#include "HAL/FileManager.h"
+#include "Misc/Paths.h"
 
 #define LOCTEXT_NAMESPACE "UnrealClaude"
 
@@ -80,6 +84,18 @@ void SClaudeInputArea::Construct(const FArguments& InArgs)
 			.VAlign(VAlign_Bottom)
 			[
 				SNew(SVerticalBox)
+
+				// Browse image file button
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("Browse", "Browse"))
+					.OnClicked(this, &SClaudeInputArea::HandleBrowseClicked)
+					.ToolTipText(LOCTEXT("BrowseTip", "Attach an image file (PNG, JPG)"))
+					.IsEnabled_Lambda([this]() { return !bIsWaiting.Get(); })
+				]
 
 				// Paste from clipboard button
 				+ SVerticalBox::Slot()
@@ -239,6 +255,71 @@ FReply SClaudeInputArea::HandlePasteClicked()
 		FString NewText = CurrentInputText + ClipboardText;
 		SetText(NewText);
 	}
+	return FReply::Handled();
+}
+
+FReply SClaudeInputArea::HandleBrowseClicked()
+{
+	using namespace UnrealClaudeConstants::ClipboardImage;
+
+	if (AttachedImagePaths.Num() >= MaxImagesPerMessage)
+	{
+		UE_LOG(LogUnrealClaude, Log, TEXT("Browse rejected: already at max (%d images)"), MaxImagesPerMessage);
+		return FReply::Handled();
+	}
+
+	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
+	if (!DesktopPlatform)
+	{
+		return FReply::Handled();
+	}
+
+	TArray<FString> SelectedFiles;
+	const void* ParentWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+	const bool bOpened = DesktopPlatform->OpenFileDialog(
+		ParentWindowHandle,
+		TEXT("Select Image"),
+		FPaths::GetPath(FPaths::ProjectDir()),
+		TEXT(""),
+		TEXT("Image Files (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg"),
+		EFileDialogFlags::None,
+		SelectedFiles
+	);
+
+	if (!bOpened || SelectedFiles.Num() == 0)
+	{
+		return FReply::Handled();
+	}
+
+	const FString& SourcePath = SelectedFiles[0];
+	const int64 FileSize = IFileManager::Get().FileSize(*SourcePath);
+	if (FileSize <= 0 || FileSize > MaxImageFileSize)
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Selected image invalid or too large: %s (%lld bytes)"), *SourcePath, FileSize);
+		return FReply::Handled();
+	}
+
+	// Copy to screenshot directory so BuildStreamJsonPayload can find it
+	FClipboardImageUtils::CleanupOldScreenshots(
+		FClipboardImageUtils::GetScreenshotDirectory(),
+		UnrealClaudeConstants::ClipboardImage::MaxScreenshotAgeSeconds);
+
+	FString Ext = FPaths::GetExtension(SourcePath).ToLower();
+	FString DestFilename = FString::Printf(TEXT("attached_%lld.%s"), FDateTime::UtcNow().GetTicks(), *Ext);
+	FString DestPath = FPaths::Combine(FClipboardImageUtils::GetScreenshotDirectory(), DestFilename);
+	IFileManager::Get().MakeDirectory(*FPaths::GetPath(DestPath), true);
+
+	if (!IFileManager::Get().Copy(*DestPath, *SourcePath))
+	{
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to copy image to screenshot dir: %s"), *SourcePath);
+		return FReply::Handled();
+	}
+
+	AttachedImagePaths.Add(DestPath);
+	ThumbnailBrushes.Add(CreateThumbnailBrush(DestPath));
+	RebuildImagePreviewStrip();
+	OnImagesChangedDelegate.ExecuteIfBound(AttachedImagePaths);
+
 	return FReply::Handled();
 }
 

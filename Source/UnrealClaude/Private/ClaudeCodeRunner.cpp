@@ -494,9 +494,12 @@ FString FClaudeCodeRunner::BuildStreamJsonPayload(const FString& TextPrompt, con
 		FString Base64ImageData = FBase64::Encode(ImageData);
 		TotalImageBytes += FileSize;
 
+		FString Ext = FPaths::GetExtension(ImagePath).ToLower();
+		FString MediaType = (Ext == TEXT("jpg") || Ext == TEXT("jpeg")) ? TEXT("image/jpeg") : TEXT("image/png");
+
 		TSharedPtr<FJsonObject> Source = MakeShared<FJsonObject>();
 		Source->SetStringField(TEXT("type"), TEXT("base64"));
-		Source->SetStringField(TEXT("media_type"), TEXT("image/png"));
+		Source->SetStringField(TEXT("media_type"), MediaType);
 		Source->SetStringField(TEXT("data"), Base64ImageData);
 
 		TSharedPtr<FJsonObject> ImageBlock = MakeShared<FJsonObject>();
