@@ -293,26 +293,100 @@ FReply SClaudeInputArea::HandleBrowseClicked()
 
 	const FString& SourcePath = SelectedFiles[0];
 	const int64 FileSize = IFileManager::Get().FileSize(*SourcePath);
-	if (FileSize <= 0 || FileSize > MaxImageFileSize)
+	if (FileSize <= 0)
 	{
-		UE_LOG(LogUnrealClaude, Warning, TEXT("Selected image invalid or too large: %s (%lld bytes)"), *SourcePath, FileSize);
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Selected image is empty: %s"), *SourcePath);
 		return FReply::Handled();
 	}
 
-	// Copy to screenshot directory so BuildStreamJsonPayload can find it
 	FClipboardImageUtils::CleanupOldScreenshots(
 		FClipboardImageUtils::GetScreenshotDirectory(),
 		UnrealClaudeConstants::ClipboardImage::MaxScreenshotAgeSeconds);
 
-	FString Ext = FPaths::GetExtension(SourcePath).ToLower();
-	FString DestFilename = FString::Printf(TEXT("attached_%lld.%s"), FDateTime::UtcNow().GetTicks(), *Ext);
-	FString DestPath = FPaths::Combine(FClipboardImageUtils::GetScreenshotDirectory(), DestFilename);
-	IFileManager::Get().MakeDirectory(*FPaths::GetPath(DestPath), true);
+	FString DestPath;
 
-	if (!IFileManager::Get().Copy(*DestPath, *SourcePath))
+	if (FileSize > MaxImageFileSize)
 	{
-		UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to copy image to screenshot dir: %s"), *SourcePath);
-		return FReply::Handled();
+		// Re-encode as JPEG to reduce size
+		IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
+
+		TArray<uint8> RawFileData;
+		if (!FFileHelper::LoadFileToArray(RawFileData, *SourcePath))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to load image: %s"), *SourcePath);
+			return FReply::Handled();
+		}
+
+		EImageFormat DetectedFormat = ImageWrapperModule.DetectImageFormat(RawFileData.GetData(), RawFileData.Num());
+		TSharedPtr<IImageWrapper> SrcWrapper = ImageWrapperModule.CreateImageWrapper(DetectedFormat);
+		if (!SrcWrapper.IsValid() || !SrcWrapper->SetCompressed(RawFileData.GetData(), RawFileData.Num()))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to decode image: %s"), *SourcePath);
+			return FReply::Handled();
+		}
+
+		TArray<uint8> RawPixels;
+		if (!SrcWrapper->GetRaw(ERGBFormat::BGRA, 8, RawPixels))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to get raw pixels: %s"), *SourcePath);
+			return FReply::Handled();
+		}
+
+		int32 Width = SrcWrapper->GetWidth();
+		int32 Height = SrcWrapper->GetHeight();
+
+		// Scale down if still too large after JPEG compression estimate
+		const float CompressionRatio = 0.08f; // JPEG ~8:1 for photos
+		float ScaleFactor = FMath::Sqrt((float)MaxImageFileSize / (FileSize * CompressionRatio));
+		if (ScaleFactor < 1.0f)
+		{
+			int32 NewWidth = FMath::Max(1, (int32)(Width * ScaleFactor));
+			int32 NewHeight = FMath::Max(1, (int32)(Height * ScaleFactor));
+
+			TArray<uint8> ScaledPixels;
+			ScaledPixels.SetNumUninitialized(NewWidth * NewHeight * 4);
+			for (int32 Y = 0; Y < NewHeight; Y++)
+			{
+				for (int32 X = 0; X < NewWidth; X++)
+				{
+					int32 SrcX = X * Width / NewWidth;
+					int32 SrcY = Y * Height / NewHeight;
+					int32 SrcIdx = (SrcY * Width + SrcX) * 4;
+					int32 DstIdx = (Y * NewWidth + X) * 4;
+					ScaledPixels[DstIdx + 0] = RawPixels[SrcIdx + 0];
+					ScaledPixels[DstIdx + 1] = RawPixels[SrcIdx + 1];
+					ScaledPixels[DstIdx + 2] = RawPixels[SrcIdx + 2];
+					ScaledPixels[DstIdx + 3] = RawPixels[SrcIdx + 3];
+				}
+			}
+			RawPixels = MoveTemp(ScaledPixels);
+			Width = NewWidth;
+			Height = NewHeight;
+		}
+
+		TSharedPtr<IImageWrapper> JpegWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::JPEG);
+		JpegWrapper->SetRaw(RawPixels.GetData(), RawPixels.Num(), Width, Height, ERGBFormat::BGRA, 8);
+		TArray64<uint8> Compressed = JpegWrapper->GetCompressed(85);
+
+		FString DestFilename = FString::Printf(TEXT("attached_%lld.jpg"), FDateTime::UtcNow().GetTicks());
+		DestPath = FPaths::Combine(FClipboardImageUtils::GetScreenshotDirectory(), DestFilename);
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(DestPath), true);
+		FFileHelper::SaveArrayToFile(TArrayView<const uint8>(Compressed.GetData(), Compressed.Num()), *DestPath);
+
+		UE_LOG(LogUnrealClaude, Log, TEXT("Image re-encoded as JPEG: %s (%lld -> %lld bytes)"), *SourcePath, FileSize, (int64)Compressed.Num());
+	}
+	else
+	{
+		FString Ext = FPaths::GetExtension(SourcePath).ToLower();
+		FString DestFilename = FString::Printf(TEXT("attached_%lld.%s"), FDateTime::UtcNow().GetTicks(), *Ext);
+		DestPath = FPaths::Combine(FClipboardImageUtils::GetScreenshotDirectory(), DestFilename);
+		IFileManager::Get().MakeDirectory(*FPaths::GetPath(DestPath), true);
+
+		if (!IFileManager::Get().Copy(*DestPath, *SourcePath))
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to copy image: %s"), *SourcePath);
+			return FReply::Handled();
+		}
 	}
 
 	AttachedImagePaths.Add(DestPath);
@@ -463,26 +537,25 @@ void SClaudeInputArea::RebuildImagePreviewStrip()
 
 TSharedPtr<FSlateDynamicImageBrush> SClaudeInputArea::CreateThumbnailBrush(const FString& FilePath) const
 {
-	// Load PNG file from disk
-	TArray<uint8> PngData;
-	if (!FFileHelper::LoadFileToArray(PngData, *FilePath))
+	TArray<uint8> FileData;
+	if (!FFileHelper::LoadFileToArray(FileData, *FilePath))
 	{
 		UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to load image for thumbnail: %s"), *FilePath);
 		return nullptr;
 	}
 
-	// Decompress PNG to raw pixels
 	IImageWrapperModule& ImageWrapperModule = FModuleManager::LoadModuleChecked<IImageWrapperModule>(TEXT("ImageWrapper"));
-	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
+	EImageFormat DetectedFormat = ImageWrapperModule.DetectImageFormat(FileData.GetData(), FileData.Num());
+	TSharedPtr<IImageWrapper> ImageWrapper = ImageWrapperModule.CreateImageWrapper(DetectedFormat);
 
 	if (!ImageWrapper.IsValid())
 	{
 		return nullptr;
 	}
 
-	if (!ImageWrapper->SetCompressed(PngData.GetData(), PngData.Num()))
+	if (!ImageWrapper->SetCompressed(FileData.GetData(), FileData.Num()))
 	{
-		UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to decompress PNG for thumbnail"));
+		UE_LOG(LogUnrealClaude, Warning, TEXT("Failed to decompress image for thumbnail: %s"), *FilePath);
 		return nullptr;
 	}
 
