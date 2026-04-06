@@ -23,6 +23,7 @@ export const SIMPLE_TOOL_NAMES = new Set([
   "capture_viewport",
   "get_output_log",
   "blueprint_query",
+  "show_asset_candidates",
 ]);
 
 // Hidden tools: callable but never listed
