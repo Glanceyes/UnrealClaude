@@ -6,6 +6,7 @@
 #include "IClaudeRunner.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
+#include "Widgets/SAssetCandidatesPanel.h"
 
 class SMultiLineEditableTextBox;
 class SScrollBox;
@@ -42,22 +43,31 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual ~SClaudeEditorWidget();
 
+	// ── Asset Candidates Panel ───────────────────────────────────────────────
+
+	/** Populate the candidates panel with retrieval results and make it visible */
+	void ShowAssetCandidates(const TArray<FAssetCandidate>& Candidates);
+
+	/** Get the currently active (visible) widget instance.
+	 *  Used by MCPTool_ShowAssetCandidates to push results into the panel. */
+	static TSharedPtr<SClaudeEditorWidget> GetActive();
+
 private:
 	/** UI Construction */
 	TSharedRef<SWidget> BuildToolbar();
 	TSharedRef<SWidget> BuildChatArea();
 	TSharedRef<SWidget> BuildInputArea();
 	TSharedRef<SWidget> BuildStatusBar();
-	
+
 	/** Add a message to the chat display */
 	void AddMessage(const FString& Message, bool bIsUser);
-	
+
 	/** Add streaming response (appends to last assistant message) */
 	void AppendToLastResponse(const FString& Text);
-	
+
 	/** Send the current input to Claude */
 	void SendMessage();
-	
+
 	/** Clear chat history */
 	void ClearChat();
 
@@ -72,19 +82,19 @@ private:
 
 	/** Start a new session (clear history and saved session) */
 	void NewSession();
-	
+
 	/** Handle response from Claude */
 	void OnClaudeResponse(const FString& Response, bool bSuccess);
-	
+
 	/** Check if Claude CLI is available */
 	bool IsClaudeAvailable() const;
-	
+
 	/** Get status text */
 	FText GetStatusText() const;
-	
+
 	/** Get status color */
 	FSlateColor GetStatusColor() const;
-	
+
 private:
 	/** Chat message container */
 	TSharedPtr<SVerticalBox> ChatMessagesBox;
@@ -95,9 +105,15 @@ private:
 	/** Input area widget */
 	TSharedPtr<SClaudeInputArea> InputArea;
 
+	/** Asset candidates panel (shown when retrieval results arrive) */
+	TSharedPtr<SAssetCandidatesPanel> AssetCandidatesPanel;
+
+	/** Singleton weak reference for MCP tool access */
+	static TWeakPtr<SClaudeEditorWidget> ActiveWidgetWeak;
+
 	/** Current input text */
 	FString CurrentInputText;
-	
+
 	/** Is currently waiting for response */
 	bool bIsWaitingForResponse = false;
 

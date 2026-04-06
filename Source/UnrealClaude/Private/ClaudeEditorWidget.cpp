@@ -10,6 +10,7 @@
 #include "MCP/MCPToolRegistry.h"
 #include "Widgets/SClaudeToolbar.h"
 #include "Widgets/SClaudeInputArea.h"
+#include "Widgets/SAssetCandidatesPanel.h"
 
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -28,6 +29,9 @@
 #include "HAL/PlatformApplicationMisc.h"
 
 #define LOCTEXT_NAMESPACE "UnrealClaude"
+
+// Static singleton weak pointer — set in Construct, cleared in destructor
+TWeakPtr<SClaudeEditorWidget> SClaudeEditorWidget::ActiveWidgetWeak;
 
 // ============================================================================
 // SChatMessage
@@ -146,7 +150,22 @@ void SClaudeEditorWidget::Construct(const FArguments& InArgs)
 		[
 			SNew(SSeparator)
 		]
-		
+
+		// Asset candidates panel (collapsed until retrieval results arrive)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(FMargin(8.f, 4.f))
+		[
+			SAssignNew(AssetCandidatesPanel, SAssetCandidatesPanel)
+		]
+
+		// Separator
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		[
+			SNew(SSeparator)
+		]
+
 		// Input area
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -163,6 +182,9 @@ void SClaudeEditorWidget::Construct(const FArguments& InArgs)
 		]
 	];
 	
+	// Register this instance as the active widget (for MCP tool access)
+	ActiveWidgetWeak = StaticCastSharedRef<SClaudeEditorWidget>(AsShared());
+
 	// Check Claude availability on startup
 	if (!IsClaudeAvailable())
 	{
@@ -182,8 +204,29 @@ void SClaudeEditorWidget::Construct(const FArguments& InArgs)
 
 SClaudeEditorWidget::~SClaudeEditorWidget()
 {
+	// Deregister active widget reference
+	if (ActiveWidgetWeak.Pin().Get() == this)
+	{
+		ActiveWidgetWeak.Reset();
+	}
+
 	// Cancel any pending requests
 	FClaudeCodeSubsystem::Get().CancelCurrentRequest();
+}
+
+// ── Asset Candidates Panel ───────────────────────────────────────────────────
+
+TSharedPtr<SClaudeEditorWidget> SClaudeEditorWidget::GetActive()
+{
+	return ActiveWidgetWeak.Pin();
+}
+
+void SClaudeEditorWidget::ShowAssetCandidates(const TArray<FAssetCandidate>& Candidates)
+{
+	if (AssetCandidatesPanel.IsValid())
+	{
+		AssetCandidatesPanel->SetCandidates(Candidates);
+	}
 }
 
 TSharedRef<SWidget> SClaudeEditorWidget::BuildToolbar()
