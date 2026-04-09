@@ -46,6 +46,9 @@ public class UnrealClaude : ModuleRules
 				"Sockets",
 				"Networking",
 				"ImageWrapper",
+				"UMG",
+				"RenderCore",
+				"RHI",
 				// Blueprint manipulation
 				"Kismet",
 				"KismetCompiler",

@@ -229,6 +229,22 @@ void SClaudeEditorWidget::ShowAssetCandidates(const TArray<FAssetCandidate>& Can
 	}
 }
 
+void SClaudeEditorWidget::ShowAssetGroup(const FString& ObjectName, const TArray<FAssetCandidate>& Candidates)
+{
+	if (AssetCandidatesPanel.IsValid())
+	{
+		AssetCandidatesPanel->SetGroup(ObjectName, Candidates);
+	}
+}
+
+void SClaudeEditorWidget::AppendAssetGroup(const FString& ObjectName, const TArray<FAssetCandidate>& Candidates)
+{
+	if (AssetCandidatesPanel.IsValid())
+	{
+		AssetCandidatesPanel->AppendGroup(ObjectName, Candidates);
+	}
+}
+
 TSharedRef<SWidget> SClaudeEditorWidget::BuildToolbar()
 {
 	return SNew(SClaudeToolbar)

@@ -45,8 +45,14 @@ public:
 
 	// ── Asset Candidates Panel ───────────────────────────────────────────────
 
-	/** Populate the candidates panel with retrieval results and make it visible */
+	/** Clear panel and show first object's candidates (legacy, no group label) */
 	void ShowAssetCandidates(const TArray<FAssetCandidate>& Candidates);
+
+	/** Clear panel and show first object's candidates with a group label */
+	void ShowAssetGroup(const FString& ObjectName, const TArray<FAssetCandidate>& Candidates);
+
+	/** Append another object's candidates to the existing panel (does not clear) */
+	void AppendAssetGroup(const FString& ObjectName, const TArray<FAssetCandidate>& Candidates);
 
 	/** Get the currently active (visible) widget instance.
 	 *  Used by MCPTool_ShowAssetCandidates to push results into the panel. */

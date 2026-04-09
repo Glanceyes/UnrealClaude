@@ -20,6 +20,8 @@
 #include "WorkspaceMenuStructureModule.h"
 #include "Framework/Application/SlateApplication.h"
 #include "HttpServerModule.h"
+#include "Misc/PackageName.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 
 DEFINE_LOG_CATEGORY(LogUnrealClaude);
 
@@ -154,6 +156,50 @@ void FUnrealClaudeModule::StartupModule()
 	else
 	{
 		UE_LOG(LogUnrealClaude, Warning, TEXT("Claude CLI not found. Please install with: npm install -g @anthropic-ai/claude-code"));
+	}
+
+	// Mount in-house asset directories for cross-project access
+	{
+		const FString BlueClientContent = TEXT("C:/Workspace/BlueClient2/Content/");
+		if (FPaths::DirectoryExists(BlueClientContent))
+		{
+			// Primary mount: lets Python load assets via /BlueClient2/<path>
+			FPackageName::RegisterMountPoint(TEXT("/BlueClient2/"), BlueClientContent);
+			UE_LOG(LogUnrealClaude, Log, TEXT("Mounted BlueClient2 content: /BlueClient2/ -> %s"), *BlueClientContent);
+
+			// Additional /Game/<sub>/ mounts for cross-project material dependencies.
+			// SM_ uassets were saved with BlueClient2 as the active project (/Game/ == BlueClient2/Content/).
+			// Mount each sub-directory only if the current project doesn't have the same path.
+			const TArray<FString> SubDirs = {
+				TEXT("BG/"),
+				TEXT("Textures/"),
+				TEXT("MetaHumans/"),
+				TEXT("Sample/"),
+			};
+			for (const FString& Sub : SubDirs)
+			{
+				FString SrcDir  = BlueClientContent + Sub;
+				FString MntPath = TEXT("/Game/") + Sub;
+				if (FPaths::DirectoryExists(SrcDir) &&
+				    !FPaths::DirectoryExists(FPaths::ProjectContentDir() / Sub))
+				{
+					FPackageName::RegisterMountPoint(*MntPath, *SrcDir);
+					UE_LOG(LogUnrealClaude, Log, TEXT("Mounted BlueClient2: %s -> %s"), *MntPath, *SrcDir);
+				}
+			}
+		}
+		else
+		{
+			UE_LOG(LogUnrealClaude, Warning, TEXT("BlueClient2 content not found at %s — in-house assets unavailable"), *BlueClientContent);
+		}
+	}
+
+	// Trigger Asset Registry scan for BlueClient2 so FAssetThumbnail
+	// can use FAssetData (no LoadObject) when the candidates panel opens later.
+	{
+		IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		AR.ScanPathsSynchronous({ TEXT("/BlueClient2/BG/") }, /*bForceRescan=*/true);
+		UE_LOG(LogUnrealClaude, Log, TEXT("Asset Registry scan completed for /BlueClient2/BG/"));
 	}
 
 	// Start MCP Server
